@@ -1,4 +1,5 @@
-const APP_URL = "https://script.google.com/macros/s/AKfycbytBi9-Zpgs286ouGqI6DG5GiA5uYhqhCnFFmdoi3fXD-roBkPQhVNzx8i7aAKXGLAY/exec";
+const APP_URL =
+  "https://script.google.com/macros/s/AKfycbytBi9-Zpgs286ouGqI6DG5GiA5uYhqhCnFFmdoi3fXD-roBkPQhVNzx8i7aAKXGLAY/exec";
 
 function esc(value = "") {
   return String(value)
@@ -9,11 +10,8 @@ function esc(value = "") {
 }
 
 exports.handler = async (event) => {
-  const eventId = (
-    (event.queryStringParameters &&
-      event.queryStringParameters.id) ||
-    ""
-  ).trim();
+  const params = event.queryStringParameters || {};
+  const eventId = (params.id || "").trim();
 
   if (!eventId) {
     return {
@@ -27,9 +25,6 @@ exports.handler = async (event) => {
 
   const metaUrl =
     `${APP_URL}?page=meta&event=${encodeURIComponent(eventId)}`;
-
-  const requestUrl =
-    `${APP_URL}?page=request&event=${encodeURIComponent(eventId)}`;
 
   try {
     const response = await fetch(metaUrl, {
@@ -54,6 +49,69 @@ exports.handler = async (event) => {
       };
     }
 
+    /*
+     * IMAGE MODE
+     * Facebook requests this URL for the event image.
+     */
+    if (params.image === "1") {
+      if (!data.featuredImageUrl) {
+        return {
+          statusCode: 404,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8"
+          },
+          body: "Featured image not found."
+        };
+      }
+
+      const imageResponse = await fetch(
+        data.featuredImageUrl,
+        {
+          redirect: "follow"
+        }
+      );
+
+      if (!imageResponse.ok) {
+        throw new Error(
+          `Image request failed: ${imageResponse.status}`
+        );
+      }
+
+      const contentType =
+        imageResponse.headers.get("content-type") ||
+        "image/jpeg";
+
+      const imageBuffer =
+        Buffer.from(
+          await imageResponse.arrayBuffer()
+        );
+
+      return {
+        statusCode: 200,
+        isBase64Encoded: true,
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control":
+            "public, max-age=3600"
+        },
+        body: imageBuffer.toString("base64")
+      };
+    }
+
+    /*
+     * NORMAL SHARE PAGE
+     */
+    const requestUrl =
+      `${APP_URL}?page=request&event=${encodeURIComponent(eventId)}`;
+
+    const canonical =
+      `https://${event.headers.host}/event?id=${encodeURIComponent(eventId)}`;
+
+    const imageUrl =
+      data.featuredImageUrl
+        ? `https://${event.headers.host}/event?id=${encodeURIComponent(eventId)}&image=1`
+        : "";
+
     const title =
       `${data.eventName} | Request My Jam`;
 
@@ -61,15 +119,10 @@ exports.handler = async (event) => {
       `Request a song for ${data.eventName}` +
       `${data.town ? " in " + data.town : ""}.`;
 
-    const image =
-      data.featuredImageUrl || "";
-
-    const canonical =
-      `https://${event.headers.host}/event?id=${encodeURIComponent(eventId)}`;
-
     const html = `<!doctype html>
 <html>
 <head>
+
 <meta charset="utf-8">
 
 <title>${esc(title)}</title>
@@ -100,10 +153,10 @@ exports.handler = async (event) => {
 >
 
 ${
-  image
+  imageUrl
     ? `<meta
   property="og:image"
-  content="${esc(image)}"
+  content="${esc(imageUrl)}"
 >
 <meta
   property="og:image:width"
@@ -132,10 +185,10 @@ ${
 >
 
 ${
-  image
+  imageUrl
     ? `<meta
   name="twitter:image"
-  content="${esc(image)}"
+  content="${esc(imageUrl)}"
 >`
     : ""
 }
@@ -162,20 +215,22 @@ ${
 >
 
 <div>
-  <h1>Request My Jam</h1>
 
-  <p>
-    Opening ${esc(data.eventName)}…
-  </p>
+<h1>Request My Jam</h1>
 
-  <p>
-    <a
-      style="color:#fff"
-      href="${esc(requestUrl)}"
-    >
-      Continue to song requests
-    </a>
-  </p>
+<p>
+Opening ${esc(data.eventName)}…
+</p>
+
+<p>
+<a
+  style="color:#fff"
+  href="${esc(requestUrl)}"
+>
+Continue to song requests
+</a>
+</p>
+
 </div>
 
 </body>
@@ -194,6 +249,7 @@ ${
     };
 
   } catch (err) {
+
     return {
       statusCode: 502,
       headers: {
